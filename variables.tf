@@ -6,13 +6,12 @@ variable "tags" {
   }
 }
 
-variable "l7_logging_bucket" {
-  description = "Name of L7 Access Logging bucket to create"
+variable "logging_bucket" {
+  description = "Name of Access Logging bucket to create"
   type        = string
-  default     = ""
 }
 
-variable "l7_logging_expiration" {
+variable "logging_expiration" {
   description = "Expiration lifecycle rules for access logging bucket"
   type = list(object({
     enabled = bool
@@ -21,17 +20,11 @@ variable "l7_logging_expiration" {
     days = optional(number) # Specifies the number of days after object creation when the specific rule action takes effect.
     id   = optional(string)
   }))
-  default = [
-    {
-      id      = "Delete2Years"
-      enabled = true
-      days    = 730
-    },
-  ]
+  default = []
 }
 
-variable "l7_logging_transition" {
-  description = "L7 Logging class storage transitions"
+variable "logging_transition" {
+  description = "Logging class storage transitions"
   type = list(object({
     enabled       = bool
     storage_class = string
@@ -56,13 +49,13 @@ variable "l7_logging_transition" {
   ]
 }
 
-variable "l7_object_lock_enabled" {
+variable "object_lock_enabled" {
   description = "Enable Object Lock on the bucket. See https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html"
   type        = bool
   default     = false
 }
 
-variable "l7_object_default_retention" {
+variable "object_default_retention" {
   description = "Object lock default retention configuration. See https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock-overview.html"
   type = object({
     mode  = string
@@ -75,19 +68,19 @@ variable "l7_object_default_retention" {
   }
 }
 
-variable "l7_logging_bucket_policy" {
+variable "logging_bucket_policy" {
   description = "Bucket policy document, if any"
   type        = string
   default     = ""
 }
 
-variable "l7_logging_prefixes" {
-  description = "Prefixes you want to include in the resource policy for the bucket"
+variable "logging_prefixes" {
+  description = "Prefixes you want to include in the resource policy for the bucket. Set to an empty list to allow all (*)"
   type        = list(string)
-  default     = ["alb"]
+  default     = []
 }
 
-variable "l7_public_block" {
+variable "public_block" {
   description = "Public block settings for S3 bucket"
   type = object({
     block_public_acls   = bool

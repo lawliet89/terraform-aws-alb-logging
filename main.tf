@@ -1,12 +1,12 @@
 # tfsec:ignore:aws-s3-enable-bucket-logging
-resource "aws_s3_bucket" "l7_access_logs" {
-  bucket = var.l7_logging_bucket
+resource "aws_s3_bucket" "access_logs" {
+  bucket = var.logging_bucket
   tags   = var.tags
 
-  force_destroy = !var.l7_object_lock_enabled
+  force_destroy = !var.object_lock_enabled
 
   dynamic "object_lock_configuration" {
-    for_each = var.l7_object_lock_enabled ? [var.l7_object_default_retention] : []
+    for_each = var.object_lock_enabled ? [var.object_default_retention] : []
 
     content {
       object_lock_enabled = "Enabled"
@@ -25,8 +25,8 @@ resource "aws_s3_bucket" "l7_access_logs" {
 # ONLY supports SSE-S3
 # See https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html#access-logging-bucket-permissions
 # tfsec:ignore:aws-s3-encryption-customer-key
-resource "aws_s3_bucket_server_side_encryption_configuration" "l7_access_logs" {
-  bucket = aws_s3_bucket.l7_access_logs.id
+resource "aws_s3_bucket_server_side_encryption_configuration" "access_logs" {
+  bucket = aws_s3_bucket.access_logs.id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -36,32 +36,36 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "l7_access_logs" {
 }
 
 # Enable versioning to simplify supporting object locks
-resource "aws_s3_bucket_versioning" "l7_access_logs" {
-  bucket = aws_s3_bucket.l7_access_logs.id
+resource "aws_s3_bucket_versioning" "access_logs" {
+  bucket = aws_s3_bucket.access_logs.id
 
   versioning_configuration {
     status = "Enabled"
   }
 }
 
-resource "aws_s3_bucket_public_access_block" "l7_access_logs" {
-  bucket = aws_s3_bucket.l7_access_logs.id
+resource "aws_s3_bucket_public_access_block" "access_logs" {
+  bucket = aws_s3_bucket.access_logs.id
 
-  block_public_acls       = var.l7_public_block.block_public_acls
-  block_public_policy     = var.l7_public_block.block_public_policy
-  ignore_public_acls      = var.l7_public_block.ignore_public_acls
-  restrict_public_buckets = var.l7_public_block.restrict_public_buckets
+  block_public_acls       = var.public_block.block_public_acls
+  block_public_policy     = var.public_block.block_public_policy
+  ignore_public_acls      = var.public_block.ignore_public_acls
+  restrict_public_buckets = var.public_block.restrict_public_buckets
 }
 
-resource "aws_s3_bucket_lifecycle_configuration" "l7_access_logs" {
-  bucket = aws_s3_bucket.l7_access_logs.id
+resource "aws_s3_bucket_lifecycle_configuration" "access_logs" {
+  bucket = aws_s3_bucket.access_logs.id
 
   dynamic "rule" {
-    for_each = var.l7_logging_transition
+    for_each = var.logging_transition
 
     content {
       id     = rule.value.id
       status = rule.value.enabled ? "Enabled" : "Disabled"
+
+      filter {
+        prefix = ""
+      }
 
       transition {
         date = rule.value.date
@@ -75,25 +79,33 @@ resource "aws_s3_bucket_lifecycle_configuration" "l7_access_logs" {
   # Because the bucket is versioned, we need two extra rules to delete markers and expire non-concurrent versions
   # https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-configuration-examples.html#lifecycle-config-conceptual-ex7
   rule {
-    enabled = true
+    status = "Enabled"
+    id     = "DeleteEpxpiredMarker"
 
+    filter {
+      prefix = ""
+    }
     expiration {
       expired_object_delete_marker = true
     }
   }
   rule {
-    enabled = true
+    status = "Enabled"
+    id     = "ExpireNonCurrent"
 
+    filter {
+      prefix = ""
+    }
     noncurrent_version_expiration {
-      days = 1
+      noncurrent_days = 1
     }
   }
 }
 
 locals {
-  l7_logging_prefixes = [for prefix in var.l7_logging_prefixes :
-    "arn:aws:s3:::${var.l7_logging_bucket}/${prefix}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
-  ]
+  logging_prefixes = length(var.logging_prefixes) > 0 ? [for prefix in var.logging_prefixes :
+    "arn:aws:s3:::${var.logging_bucket}/${prefix}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
+  ] : ["arn:aws:s3:::${var.logging_bucket}/*"]
 
   # See https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html#access-logging-bucket-permissions
   elb_account_id = {
@@ -125,10 +137,10 @@ locals {
   }
 }
 
-data "aws_iam_policy_document" "l7_logging_elb" {
+data "aws_iam_policy_document" "logging_elb" {
   statement {
     actions   = ["s3:PutObject"]
-    resources = local.l7_logging_prefixes
+    resources = local.logging_prefixes
 
     principals {
       type        = "AWS"
@@ -138,7 +150,7 @@ data "aws_iam_policy_document" "l7_logging_elb" {
 
   statement {
     actions   = ["s3:PutObject"]
-    resources = local.l7_logging_prefixes
+    resources = local.logging_prefixes
 
     principals {
       type        = "Service"
@@ -154,7 +166,7 @@ data "aws_iam_policy_document" "l7_logging_elb" {
 
   statement {
     actions   = ["s3:GetBucketAcl"]
-    resources = ["arn:aws:s3:::${var.l7_logging_bucket}"]
+    resources = ["arn:aws:s3:::${var.logging_bucket}"]
 
     principals {
       type        = "Service"
@@ -163,14 +175,14 @@ data "aws_iam_policy_document" "l7_logging_elb" {
   }
 }
 
-data "aws_iam_policy_document" "l7_logging_policy" {
+data "aws_iam_policy_document" "logging_policy" {
   override_policy_documents = compact([
-    data.aws_iam_policy_document.l7_logging_elb.json,
-    var.l7_logging_bucket_policy,
+    data.aws_iam_policy_document.logging_elb.json,
+    var.logging_bucket_policy,
   ])
 }
 
-resource "aws_s3_bucket_policy" "l7_access_logs" {
-  bucket = aws_s3_bucket.l7_access_logs.id
-  policy = data.aws_iam_policy_document.l7_logging_policy.json
+resource "aws_s3_bucket_policy" "access_logs" {
+  bucket = aws_s3_bucket.access_logs.id
+  policy = data.aws_iam_policy_document.logging_policy.json
 }
